@@ -50,6 +50,33 @@ A **Template Record** describes the layout of subsequent Data Records: an ordere
 
 IEs are registered with IANA (enterprise number 0) or are vendor-specific (enterprise bit set + enterprise number).
 
+### Enterprise (vendor) IEs
+
+When the high bit of the template field’s element ID is set, the next four
+bytes are a **Private Enterprise Number (PEN)**. libipfix stores the stripped
+element ID and the PEN on every field, and looks up known PENs in a static
+registry for name and abstract datatype.
+
+| PEN | Vendor | Coverage in libipfix |
+|-----|--------|---------------------|
+| 6321 | Calix | Full E7/AXOS table from `enterprises/enterprise_calix_ipfix.csv` (Fiber PON, ONT optical, Ethernet, BNG, …) |
+
+Calix Fiber PON records typically mix IANA flow IEs (if any) with enterprise
+identity and counters, for example:
+
+| Calix IE id | Name | Type | Role |
+|-------------|------|------|------|
+| 1 | hostname | string | OLT host |
+| 2 / 3 | shelf / slot | uint8 | Chassis location |
+| 4 | port | string | PON / eth port |
+| 7 | ont-id | string | Optical Network Terminal |
+| 8 / 9 | svlan / cvlan | uint16 | VLAN tags |
+| 231 | rx-opticalpower2 | int32 | Received optical power |
+| 208 / 209 | upstream/downstream-octets | uint64 | Bin counters |
+
+Use `ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX, IPFIX_CALIX_IE_…)`
+and `ipfix_enterprise_ie_name()` when processing these records.
+
 Common flow IEs used in network forensics:
 
 | ID | Name | Typical use |

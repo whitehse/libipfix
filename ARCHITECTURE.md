@@ -9,7 +9,10 @@ libipfix receives IPFIX messages (RFC 7011) from caller-supplied byte buffers, m
 | Path | Role |
 |------|------|
 | `include/ipfix.h` | Public API: config, events, field types, lifecycle |
-| `src/ipfix.c` | Parser, template cache, event ring, helpers |
+| `include/ipfix_enterprise_calix.h` | Calix PEN 6321 IE id macros (generated) |
+| `src/ipfix.c` | Parser, template cache, event ring, enterprise registry |
+| `src/enterprise_calix.inc` | Calix name/datatype table (generated) |
+| `enterprises/` | Vendor IE CSVs + generators |
 | `tests/ipfix_smoke.c` | Happy-path: header, template, 5-tuple data record |
 | `tests/ipfix_dialectic.c` | Multi-message flows, options, withdraw, enterprise IEs |
 | `tests/ipfix_errors.c` | Malformed input and configuration edge cases |
@@ -57,13 +60,20 @@ Each data-record field is classified into a value kind:
 
 | Kind | Use |
 |------|-----|
-| `UINT` | Integers ≤ 8 bytes (ports, counters, timestamps) |
+| `UINT` | Unsigned integers ≤ 8 bytes (ports, counters, timestamps) |
+| `INT` | Signed integers ≤ 8 bytes (optical power, temperature) |
+| `FLOAT` | IEEE 754 binary32/64 (promoted to `double`) |
 | `IPV4` / `IPV6` | Address IEs |
 | `MAC` | MAC address IEs |
-| `STRING` | Text IEs (e.g. applicationDescription) |
+| `STRING` | Text IEs (IANA or enterprise) |
 | `RAW` | Everything else (truncated to max) |
 
-Common flow IEs are also copied into convenience members on `ipfix_data_record_t` (`src_ipv4`, `dst_port`, `octet_delta`, …) so callers can avoid a field scan for the 5-tuple path.
+IANA classification uses well-known element IDs. Enterprise fields consult a
+**static per-PEN registry** (currently Calix PEN 6321) for datatype and name;
+unknown enterprise IEs fall back to “≤ 8 bytes → UINT, else RAW”.
+
+Common flow IEs are also copied into convenience members on `ipfix_data_record_t` (`src_ipv4`, `dst_port`, `octet_delta`, …) so callers can avoid a field scan for the 5-tuple path. Enterprise/PON fields are accessed via
+`ipfix_record_find_enterprise_field` rather than bloating the convenience block.
 
 ### Memory model
 
@@ -87,7 +97,7 @@ All buffers (event ring, template array, reassembly) are allocated once in `ipfi
 | SCTP transport | Same feed API works if caller frames messages |
 | Exporter / encoder | Reserved role; not implemented in v0.1 |
 | Callbacks | Pull queue keeps reentrancy simple |
-| Dynamic IE registry | Static IANA table + enterprise raw fields |
+| Dynamic / runtime IE registry | Static IANA table + compiled enterprise tables (ADR-013) |
 
 ## Boundaries
 

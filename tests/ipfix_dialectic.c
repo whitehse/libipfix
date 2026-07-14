@@ -1,7 +1,7 @@
 /**
  * @file ipfix_dialectic.c
  * @brief Dialectic tests: multi-message template reuse, options, withdraw,
- *        multi-record sets, reset retains templates.
+ *        multi-record sets, reset retains templates, Calix enterprise IEs.
  */
 
 #include "ipfix.h"
@@ -398,6 +398,194 @@ static void test_enterprise_field(void)
     printf("  PASS test_enterprise_field\n");
 }
 
+static void wr64(uint8_t *p, uint64_t v)
+{
+    wr32(p, (uint32_t)(v >> 32));
+    wr32(p + 4, (uint32_t)(v & 0xFFFFFFFFu));
+}
+
+/*
+ * Calix E7 Fiber PON style record (PEN 6321):
+ *   hostname (string, varlen), shelf (uint8), slot (uint8), port (string, varlen),
+ *   ont-id (string, varlen), svlan (uint16), cvlan (uint16),
+ *   sample-time (uint32), rx-opticalpower2 (int32, negative dBm),
+ *   upstream-octets (uint64), downstream-octets (uint64)
+ */
+static void test_calix_pon_enterprise(void)
+{
+    uint8_t buf[512];
+    /* 11 enterprise field specs × 8 bytes */
+    const uint16_t field_count = 11;
+    const uint16_t tmpl_set_len = (uint16_t)(4 + 4 + field_count * 8);
+    /* data: varlen hostname "e7-1" (1+4), shelf 1, slot 3, varlen port "1/1/1"
+     * (1+5), varlen ont-id "ONT-42" (1+6), svlan, cvlan, sample-time,
+     * optical power, up/down octets */
+    const uint16_t data_payload =
+        (uint16_t)(1 + 4 + 1 + 1 + 1 + 5 + 1 + 6 + 2 + 2 + 4 + 4 + 8 + 8);
+    const uint16_t data_set_len = (uint16_t)(4 + data_payload);
+    const uint16_t msg_len = (uint16_t)(16 + tmpl_set_len + data_set_len);
+    size_t off;
+    ipfix_ctx_t *ctx;
+    ipfix_event_t ev;
+    int saw = 0;
+    /* element_id, wire_length (65535 = variable) */
+    const uint16_t ies[] = {
+        IPFIX_CALIX_IE_hostname,
+        IPFIX_CALIX_IE_shelf,
+        IPFIX_CALIX_IE_slot,
+        IPFIX_CALIX_IE_port,
+        IPFIX_CALIX_IE_ont_id,
+        IPFIX_CALIX_IE_svlan,
+        IPFIX_CALIX_IE_cvlan,
+        IPFIX_CALIX_IE_sample_time,
+        IPFIX_CALIX_IE_rx_opticalpower2,
+        IPFIX_CALIX_IE_upstream_octets,
+        IPFIX_CALIX_IE_downstream_octets
+    };
+    const uint16_t lens[] = {
+        65535, 1, 1, 65535, 65535, 2, 2, 4, 4, 8, 8
+    };
+    int i;
+    int32_t optical = -1850; /* e.g. -18.50 dBm × 100 */
+
+    assert(msg_len <= sizeof(buf));
+    memset(buf, 0, msg_len);
+    wr16(buf + 0, 10);
+    wr16(buf + 2, msg_len);
+    wr32(buf + 4, 1710000000u);
+    wr32(buf + 8, 42u);
+    wr32(buf + 12, 1u);
+    off = 16;
+
+    wr16(buf + off, 2);
+    wr16(buf + off + 2, tmpl_set_len);
+    off += 4;
+    wr16(buf + off, 600);
+    wr16(buf + off + 2, field_count);
+    off += 4;
+    for (i = 0; i < (int)field_count; i++) {
+        wr16(buf + off, (uint16_t)(0x8000u | ies[i]));
+        wr16(buf + off + 2, lens[i]);
+        wr32(buf + off + 4, IPFIX_PEN_CALIX);
+        off += 8;
+    }
+
+    wr16(buf + off, 600);
+    wr16(buf + off + 2, data_set_len);
+    off += 4;
+
+    /* hostname "e7-1" */
+    buf[off++] = 4;
+    memcpy(buf + off, "e7-1", 4);
+    off += 4;
+    buf[off++] = 1; /* shelf */
+    buf[off++] = 3; /* slot */
+    /* port "1/1/1" */
+    buf[off++] = 5;
+    memcpy(buf + off, "1/1/1", 5);
+    off += 5;
+    /* ont-id "ONT-42" */
+    buf[off++] = 6;
+    memcpy(buf + off, "ONT-42", 6);
+    off += 6;
+    wr16(buf + off, 100); /* svlan */
+    off += 2;
+    wr16(buf + off, 200); /* cvlan */
+    off += 2;
+    wr32(buf + off, 1710000123u); /* sample-time */
+    off += 4;
+    wr32(buf + off, (uint32_t)optical); /* signed optical power */
+    off += 4;
+    wr64(buf + off, 1000000ull); /* upstream-octets */
+    off += 8;
+    wr64(buf + off, 2000000ull); /* downstream-octets */
+    off += 8;
+    assert(off == msg_len);
+
+    /* Registry metadata */
+    assert(ipfix_enterprise_ie_datatype(IPFIX_PEN_CALIX, IPFIX_CALIX_IE_hostname)
+           == IPFIX_IE_DT_STRING);
+    assert(ipfix_enterprise_ie_datatype(IPFIX_PEN_CALIX,
+                                        IPFIX_CALIX_IE_rx_opticalpower2)
+           == IPFIX_IE_DT_SIGNED);
+    assert(ipfix_enterprise_ie_datatype(IPFIX_PEN_CALIX,
+                                        IPFIX_CALIX_IE_upstream_octets)
+           == IPFIX_IE_DT_UNSIGNED);
+    assert(strcmp(ipfix_enterprise_ie_name(IPFIX_PEN_CALIX,
+                                           IPFIX_CALIX_IE_ont_id),
+                  "ont-id") == 0);
+    assert(ipfix_enterprise_ie_name(IPFIX_PEN_CALIX, 9999) == NULL);
+
+    ctx = ipfix_create();
+    assert(ipfix_feed_message(ctx, buf, msg_len) == 0);
+    while (ipfix_next_event(ctx, &ev) == 1) {
+        if (ev.type == IPFIX_EVENT_TEMPLATE) {
+            assert(ev.data.tmpl.template_id == 600);
+            assert(ev.data.tmpl.field_count == field_count);
+            assert(ev.data.tmpl.fields[0].enterprise_number == IPFIX_PEN_CALIX);
+            assert(ev.data.tmpl.fields[0].element_id == IPFIX_CALIX_IE_hostname);
+            assert(ev.data.tmpl.fields[0].is_variable == 1);
+        }
+        if (ev.type == IPFIX_EVENT_DATA_RECORD) {
+            const ipfix_data_record_t *rec = &ev.data.record;
+            const ipfix_field_t *f;
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_hostname);
+            assert(f != NULL);
+            assert(f->kind == IPFIX_VALUE_STRING);
+            assert(strcmp((const char *)f->v.raw, "e7-1") == 0);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_shelf);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT && f->v.u64 == 1);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_slot);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT && f->v.u64 == 3);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_port);
+            assert(f != NULL && f->kind == IPFIX_VALUE_STRING);
+            assert(strcmp((const char *)f->v.raw, "1/1/1") == 0);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_ont_id);
+            assert(f != NULL && f->kind == IPFIX_VALUE_STRING);
+            assert(strcmp((const char *)f->v.raw, "ONT-42") == 0);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_svlan);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT && f->v.u64 == 100);
+
+            f = ipfix_record_find_enterprise_field(rec, IPFIX_PEN_CALIX,
+                                                   IPFIX_CALIX_IE_cvlan);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT && f->v.u64 == 200);
+
+            f = ipfix_record_find_enterprise_field(
+                rec, IPFIX_PEN_CALIX, IPFIX_CALIX_IE_rx_opticalpower2);
+            assert(f != NULL);
+            assert(f->kind == IPFIX_VALUE_INT);
+            assert(f->v.i64 == (int64_t)optical);
+
+            f = ipfix_record_find_enterprise_field(
+                rec, IPFIX_PEN_CALIX, IPFIX_CALIX_IE_upstream_octets);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT);
+            assert(f->v.u64 == 1000000ull);
+
+            f = ipfix_record_find_enterprise_field(
+                rec, IPFIX_PEN_CALIX, IPFIX_CALIX_IE_downstream_octets);
+            assert(f != NULL && f->kind == IPFIX_VALUE_UINT);
+            assert(f->v.u64 == 2000000ull);
+
+            saw = 1;
+        }
+    }
+    assert(saw);
+    ipfix_destroy(ctx);
+    printf("  PASS test_calix_pon_enterprise\n");
+}
+
 int main(void)
 {
     printf("ipfix_dialectic:\n");
@@ -407,6 +595,7 @@ int main(void)
     test_reset_retains_templates();
     test_multi_record_data_set();
     test_enterprise_field();
+    test_calix_pon_enterprise();
     printf("All dialectic tests passed.\n");
     return 0;
 }

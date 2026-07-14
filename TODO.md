@@ -16,6 +16,7 @@
 - [ ] NetFlow v9 shim (separate set-ID/layout rules) or sibling library
 - [ ] Template persistence helpers (serialize/deserialize cache)
 - [ ] More IANA IE names and typed convenience fields (AS numbers, interfaces)
+- [ ] Additional enterprise PEN tables (Cisco, Juniper, …) using the ADR-013 pattern
 - [ ] Structured logging hook via event only (no stderr in library)
 
 ## Long-term

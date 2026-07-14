@@ -29,3 +29,14 @@ _deps/
 *.gcno
 *.gcov
 coverage/
+
+# Fuzzing
+/build-fuzz/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/*.log
+/fuzz-*.log
+crash-*
+leak-*
+timeout-*
+oom-*

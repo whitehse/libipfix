@@ -45,11 +45,21 @@ add_test(NAME ipfix_errors COMMAND ipfix_errors)
 add_executable(ipfix_example examples/ipfix_example.c)
 target_link_libraries(ipfix_example PRIVATE ipfix)
 
-# --- Fuzz (optional, needs libFuzzer) ---
+# --- Fuzz (optional, needs libFuzzer + clang) ---
 option(BUILD_FUZZ "Build fuzz harness (requires clang with libFuzzer)" OFF)
 if(BUILD_FUZZ)
+    # Instrument the library itself so ASan/UBSan catch parser bugs.
+    target_compile_options(ipfix PRIVATE
+        -g -O1 -fno-omit-frame-pointer
+        -fsanitize=fuzzer-no-link,address,undefined)
+    target_link_options(ipfix INTERFACE
+        -fsanitize=address,undefined)
+
     add_executable(ipfix_fuzz fuzz/ipfix_fuzz.c)
     target_link_libraries(ipfix_fuzz PRIVATE ipfix)
-    target_compile_options(ipfix_fuzz PRIVATE -fsanitize=fuzzer,address)
-    target_link_options(ipfix_fuzz PRIVATE -fsanitize=fuzzer,address)
+    target_compile_options(ipfix_fuzz PRIVATE
+        -g -O1 -fno-omit-frame-pointer
+        -fsanitize=fuzzer,address,undefined)
+    target_link_options(ipfix_fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined)
 endif()

@@ -76,6 +76,102 @@ static uint64_t rd_uint_be(const uint8_t *p, size_t len)
     return v;
 }
 
+/** Sign-extend a big-endian integer of 1–8 bytes into int64_t. */
+static int64_t rd_int_be(const uint8_t *p, size_t len)
+{
+    uint64_t u;
+    if (len == 0u || len > 8u) {
+        return 0;
+    }
+    u = rd_uint_be(p, len);
+    if (len < 8u) {
+        unsigned shift = (unsigned)(64u - len * 8u);
+        return (int64_t)(u << shift) >> shift;
+    }
+    return (int64_t)u;
+}
+
+static double rd_float_be(const uint8_t *p, size_t len)
+{
+    if (len == 4u) {
+        uint32_t u = rd32(p);
+        float f;
+        memcpy(&f, &u, sizeof(f));
+        return (double)f;
+    }
+    if (len == 8u) {
+        uint64_t u = rd_uint_be(p, 8);
+        double d;
+        memcpy(&d, &u, sizeof(d));
+        return d;
+    }
+    return 0.0;
+}
+
+/* ── enterprise IE registries (static tables) ────────────────────────── */
+
+typedef struct {
+    uint16_t            element_id;
+    ipfix_ie_datatype_t datatype;
+    const char         *name;
+} ipfix_enterprise_ie_desc_t;
+
+#include "enterprise_calix.inc"
+
+static const ipfix_enterprise_ie_desc_t *enterprise_ie_lookup(
+    uint32_t enterprise_number, uint16_t element_id)
+{
+    const ipfix_enterprise_ie_desc_t *table = NULL;
+    size_t count = 0;
+    size_t lo, hi;
+
+    if (enterprise_number == IPFIX_PEN_CALIX) {
+        table = ipfix_calix_ies;
+        count = ipfix_calix_ies_count;
+    } else {
+        return NULL;
+    }
+
+    lo = 0;
+    hi = count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2u;
+        uint16_t mid_id = table[mid].element_id;
+        if (mid_id < element_id) {
+            lo = mid + 1u;
+        } else if (mid_id > element_id) {
+            hi = mid;
+        } else {
+            return &table[mid];
+        }
+    }
+    return NULL;
+}
+
+static void decode_as_string(ipfix_field_t *f, const uint8_t *data,
+                             uint16_t len)
+{
+    size_t copy = len;
+    if (copy >= IPFIX_MAX_FIELD_VALUE_LEN) {
+        copy = IPFIX_MAX_FIELD_VALUE_LEN - 1u;
+    }
+    memcpy(f->v.raw, data, copy);
+    f->v.raw[copy] = 0;
+    f->length = (uint16_t)copy;
+    f->kind = IPFIX_VALUE_STRING;
+}
+
+static void decode_as_raw(ipfix_field_t *f, const uint8_t *data, uint16_t len)
+{
+    size_t copy = len;
+    if (copy > IPFIX_MAX_FIELD_VALUE_LEN) {
+        copy = IPFIX_MAX_FIELD_VALUE_LEN;
+    }
+    memcpy(f->v.raw, data, copy);
+    f->length = (uint16_t)copy;
+    f->kind = IPFIX_VALUE_RAW;
+}
+
 /* ── event ring ──────────────────────────────────────────────────────── */
 
 static void emit_event(ipfix_ctx_t *ctx, const ipfix_event_t *ev)
@@ -175,6 +271,44 @@ static void withdraw_template(ipfix_ctx_t *ctx, uint16_t id)
 
 /* ── field decoding ──────────────────────────────────────────────────── */
 
+static int decode_by_datatype(ipfix_field_t *f, const uint8_t *data,
+                              uint16_t len, ipfix_ie_datatype_t dt)
+{
+    switch (dt) {
+    case IPFIX_IE_DT_UNSIGNED:
+        if (len > 0u && len <= 8u) {
+            f->kind = IPFIX_VALUE_UINT;
+            f->v.u64 = rd_uint_be(data, len);
+            return 1;
+        }
+        break;
+    case IPFIX_IE_DT_SIGNED:
+        if (len > 0u && len <= 8u) {
+            f->kind = IPFIX_VALUE_INT;
+            f->v.i64 = rd_int_be(data, len);
+            return 1;
+        }
+        break;
+    case IPFIX_IE_DT_FLOAT:
+        if (len == 4u || len == 8u) {
+            f->kind = IPFIX_VALUE_FLOAT;
+            f->v.f64 = rd_float_be(data, len);
+            return 1;
+        }
+        break;
+    case IPFIX_IE_DT_STRING:
+        decode_as_string(f, data, len);
+        return 1;
+    case IPFIX_IE_DT_OCTETARRAY:
+        decode_as_raw(f, data, len);
+        return 1;
+    case IPFIX_IE_DT_UNKNOWN:
+    default:
+        break;
+    }
+    return 0;
+}
+
 static void decode_field_value(ipfix_field_t *f, const uint8_t *data,
                                uint16_t len)
 {
@@ -221,16 +355,7 @@ static void decode_field_value(ipfix_field_t *f, const uint8_t *data,
             break;
 
         case IPFIX_IE_applicationDescription:
-            f->kind = IPFIX_VALUE_STRING;
-            {
-                size_t copy = len;
-                if (copy >= IPFIX_MAX_FIELD_VALUE_LEN) {
-                    copy = IPFIX_MAX_FIELD_VALUE_LEN - 1u;
-                }
-                memcpy(f->v.raw, data, copy);
-                f->v.raw[copy] = 0;
-                f->length = (uint16_t)copy;
-            }
+            decode_as_string(f, data, len);
             return;
 
         default:
@@ -243,7 +368,14 @@ static void decode_field_value(ipfix_field_t *f, const uint8_t *data,
             break;
         }
     } else {
-        /* Enterprise fields: prefer integer if short, else raw. */
+        /* Known enterprise IE: use static registry datatype. */
+        const ipfix_enterprise_ie_desc_t *desc =
+            enterprise_ie_lookup(f->enterprise_number, f->element_id);
+        if (desc != NULL &&
+            decode_by_datatype(f, data, len, desc->datatype)) {
+            return;
+        }
+        /* Unknown enterprise IE: prefer integer if short, else raw. */
         if (len <= 8) {
             f->kind = IPFIX_VALUE_UINT;
             f->v.u64 = rd_uint_be(data, len);
@@ -252,15 +384,7 @@ static void decode_field_value(ipfix_field_t *f, const uint8_t *data,
     }
 
     /* Fallback: raw copy (truncated to max). */
-    {
-        size_t copy = len;
-        if (copy > IPFIX_MAX_FIELD_VALUE_LEN) {
-            copy = IPFIX_MAX_FIELD_VALUE_LEN;
-        }
-        memcpy(f->v.raw, data, copy);
-        f->length = (uint16_t)copy;
-        f->kind = IPFIX_VALUE_RAW;
-    }
+    decode_as_raw(f, data, len);
 }
 
 static void fill_convenience(ipfix_data_record_t *rec)
@@ -1048,6 +1172,28 @@ const char *ipfix_ie_name(uint16_t element_id)
     case 161: return "flowDurationMilliseconds";
     default:  return NULL;
     }
+}
+
+const char *ipfix_enterprise_ie_name(uint32_t enterprise_number,
+                                     uint16_t element_id)
+{
+    const ipfix_enterprise_ie_desc_t *desc;
+    if (enterprise_number == 0u) {
+        return ipfix_ie_name(element_id);
+    }
+    desc = enterprise_ie_lookup(enterprise_number, element_id);
+    return desc ? desc->name : NULL;
+}
+
+ipfix_ie_datatype_t ipfix_enterprise_ie_datatype(uint32_t enterprise_number,
+                                                  uint16_t element_id)
+{
+    const ipfix_enterprise_ie_desc_t *desc;
+    if (enterprise_number == 0u) {
+        return IPFIX_IE_DT_UNKNOWN;
+    }
+    desc = enterprise_ie_lookup(enterprise_number, element_id);
+    return desc ? desc->datatype : IPFIX_IE_DT_UNKNOWN;
 }
 
 const char *ipfix_event_type_name(ipfix_event_type_t type)

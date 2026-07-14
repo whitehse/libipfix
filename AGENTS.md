@@ -41,6 +41,7 @@ ctest --test-dir build
 - **Must** treat untrusted wire input as hostile (fuzz-friendly parsing)
 - **Never** allocate on the per-message hot path after `ipfix_create*`
 - **Prefer** extending IANA IE convenience fields over growing the event union ad hoc
+- **Prefer** static enterprise IE tables (ADR-013) over runtime registries or convenience fields for vendor IEs
 - **Avoid** linking external dependencies
 
 ## Definition of done
@@ -66,6 +67,7 @@ ctest --test-dir build
 | 010 | Fuzz harness |
 | 011 | Man page conventions |
 | 012 | Agent-ready documentation |
+| 013 | Static enterprise IE registry (Calix PEN 6321) |
 
 ## API surface (quick)
 
@@ -75,4 +77,6 @@ ctest --test-dir build
 | `ipfix_feed_input` / `ipfix_feed_message` | Ingest wire bytes |
 | `ipfix_next_event` | Pull decoded events |
 | `ipfix_get_template` | Inspect learned templates |
-| `ipfix_record_find_field` | Look up IE in a record |
+| `ipfix_record_find_field` | Look up IANA IE in a record |
+| `ipfix_record_find_enterprise_field` | Look up vendor IE (PEN + id) |
+| `ipfix_enterprise_ie_name` / `_datatype` | Static registry lookup |

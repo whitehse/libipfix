@@ -10,8 +10,8 @@ Core routers and probes export flow telemetry as IPFIX. A collector must learn t
 
 ## Contents
 
-- [DOMAIN.md](DOMAIN.md) — IPFIX protocol concepts, IEs, transport
-- [decisions/](decisions/) — Architecture Decision Records (ADRs 001–012)
+- [DOMAIN.md](DOMAIN.md) — IPFIX protocol concepts, IEs, transport, enterprise PENs
+- [decisions/](decisions/) — Architecture Decision Records (ADRs 001–013)
 
 ## Quick start
 
@@ -42,7 +42,10 @@ ipfix_destroy(ctx);
 | `ipfix_feed_message` | One complete message (UDP) |
 | `ipfix_next_event` | Dequeue next event |
 | `ipfix_get_template` | Look up learned template |
-| `ipfix_record_find_field` | Find IE in a data record |
+| `ipfix_record_find_field` | Find IANA IE in a data record |
+| `ipfix_record_find_enterprise_field` | Find vendor IE (PEN + id) |
+| `ipfix_enterprise_ie_name` | Name from static enterprise registry |
+| `ipfix_enterprise_ie_datatype` | Abstract type (unsigned/signed/string/…) |
 
 ## Integration sketch (io_uring / event loop)
 

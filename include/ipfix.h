@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ipfix_enterprise_calix.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -128,6 +130,21 @@ typedef enum {
     IPFIX_IE_samplingPacketSpace        = 306
 } ipfix_ie_id_t;
 
+/* ── abstract IE data types (registry / decoding hints) ──────────────── */
+
+/**
+ * Semantic data type of an Information Element from a static registry.
+ * Used to classify enterprise (and optionally IANA) fields beyond wire length.
+ */
+typedef enum {
+    IPFIX_IE_DT_UNKNOWN    = 0,  /**< Not in registry; decoder uses heuristics. */
+    IPFIX_IE_DT_UNSIGNED   = 1,  /**< Unsigned integer (uint8..uint64). */
+    IPFIX_IE_DT_SIGNED     = 2,  /**< Signed integer (int8..int64). */
+    IPFIX_IE_DT_FLOAT      = 3,  /**< IEEE 754 binary32/binary64. */
+    IPFIX_IE_DT_STRING     = 4,  /**< Character string (UTF-8 / ASCII). */
+    IPFIX_IE_DT_OCTETARRAY = 5   /**< Opaque octet array. */
+} ipfix_ie_datatype_t;
+
 /* ── field value kinds ───────────────────────────────────────────────── */
 
 /** How a decoded field value is represented. */
@@ -137,7 +154,9 @@ typedef enum {
     IPFIX_VALUE_IPV4     = 2,  /**< IPv4 address in ipv4 (host order). */
     IPFIX_VALUE_IPV6     = 3,  /**< IPv6 address in ipv6[]. */
     IPFIX_VALUE_MAC      = 4,  /**< 6-byte MAC in mac[]. */
-    IPFIX_VALUE_STRING   = 5   /**< NUL-terminated string in raw[]. */
+    IPFIX_VALUE_STRING   = 5,  /**< NUL-terminated string in raw[]. */
+    IPFIX_VALUE_INT      = 6,  /**< Signed integer in i64 (sign-extended). */
+    IPFIX_VALUE_FLOAT    = 7   /**< IEEE 754 value in f64 (float32 promoted). */
 } ipfix_value_kind_t;
 
 /** A single field specifier from a template. */
@@ -157,6 +176,8 @@ typedef struct {
     ipfix_value_kind_t kind;
     union {
         uint64_t u64;
+        int64_t  i64;                    /**< Sign-extended signed integer. */
+        double   f64;                    /**< Float32 promoted or float64. */
         uint32_t ipv4;                   /**< Host-byte-order IPv4. */
         uint8_t  ipv6[IPFIX_IPV6_ADDR_LEN];
         uint8_t  mac[6];
@@ -358,6 +379,21 @@ const ipfix_field_t *ipfix_record_find_enterprise_field(
 
 /** Human-readable name for a well-known IANA IE, or NULL if unknown. */
 const char *ipfix_ie_name(uint16_t element_id);
+
+/**
+ * Human-readable name for an enterprise IE, or NULL if unknown.
+ * For enterprise_number 0, delegates to ipfix_ie_name().
+ * Built-in registries currently include Calix (IPFIX_PEN_CALIX).
+ */
+const char *ipfix_enterprise_ie_name(uint32_t enterprise_number,
+                                     uint16_t element_id);
+
+/**
+ * Registered abstract data type for an IE, or IPFIX_IE_DT_UNKNOWN.
+ * enterprise_number 0 returns UNKNOWN (IANA types use value-kind heuristics).
+ */
+ipfix_ie_datatype_t ipfix_enterprise_ie_datatype(uint32_t enterprise_number,
+                                                  uint16_t element_id);
 
 /** Human-readable name for an event type. */
 const char *ipfix_event_type_name(ipfix_event_type_t type);
