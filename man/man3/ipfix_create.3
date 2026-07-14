@@ -1,0 +1,66 @@
+.TH IPFIX_CREATE 3 "July 2026" "libipfix 0.1.0" "Library Functions"
+.SH NAME
+ipfix_create, ipfix_create_role, ipfix_create_with_config, ipfix_destroy, ipfix_reset \- create and manage a libipfix collector context
+.SH SYNOPSIS
+.nf
+.B #include <ipfix.h>
+.sp
+.BI "ipfix_ctx_t *ipfix_create(void);"
+.BI "ipfix_ctx_t *ipfix_create_role(ipfix_role_t " role ");"
+.BI "ipfix_ctx_t *ipfix_create_with_config(ipfix_role_t " role ", const ipfix_config_t *" cfg ");"
+.BI "void ipfix_destroy(ipfix_ctx_t *" ctx ");"
+.BI "int ipfix_reset(ipfix_ctx_t *" ctx ");"
+.BI "int ipfix_clear_templates(ipfix_ctx_t *" ctx ");"
+.fi
+.SH DESCRIPTION
+.B ipfix_create()
+allocates a collector context with default configuration
+(event queue 256, max message 64 KiB, template cache 256, reassembly buffer 256 KiB).
+.PP
+.B ipfix_create_with_config()
+allows explicit control via
+.BR ipfix_config_t
+(see
+.BR ipfix_default_config ()
+in the header).
+.PP
+The library is
+.BR syscall-free
+and
+.BR callback-free .
+Socket I/O must be performed by the caller (for example with io_uring or epoll).
+Input is supplied with
+.B ipfix_feed_input()
+or
+.B ipfix_feed_message()
+and results are consumed with
+.BR ipfix_next_event ().
+.PP
+.B ipfix_destroy()
+releases all resources. It is safe to call with NULL.
+.PP
+.B ipfix_reset()
+clears the event queue and stream reassembly buffer but
+.B retains
+learned templates.
+.B ipfix_clear_templates()
+drops the template cache.
+.SH RETURN VALUE
+.B ipfix_create() ,
+.B ipfix_create_role() ,
+and
+.B ipfix_create_with_config()
+return a context pointer or NULL on allocation failure.
+.PP
+.B ipfix_reset()
+and
+.B ipfix_clear_templates()
+return 0 on success or a negative error code.
+.SH SEE ALSO
+.BR ipfix_feed_input (3),
+.BR ipfix_feed_message (3),
+.BR ipfix_next_event (3)
+.SH STANDARDS
+RFC 7011 — Specification of the IP Flow Information Export (IPFIX) Protocol.
+.SH BUGS
+NetFlow v5/v9 are not supported. The exporter role is reserved but not implemented.
