@@ -104,3 +104,9 @@ All buffers (event ring, template array, reassembly) are allocated once in `ipfi
 - **Public:** everything in `include/ipfix.h`
 - **Internal:** all static helpers in `src/ipfix.c`
 - **Caller owns:** UDP/TCP sockets, timers for template refresh policy, persistence of templates across process restarts, fan-out to ClickHouse/Vector/etc.
+
+## Application consumers
+
+- **`~/apps/netforensics`** — core IPFIX ingest and flow-key correlation (design: `~/new_design3.txt`).
+  Uses `ipfix_record_flow_key`, 5-tuple helpers, and BGP/next-hop convenience fields.
+  ClickHouse persistence and Vector fan-in stay in the app.

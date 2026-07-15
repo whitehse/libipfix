@@ -450,6 +450,60 @@ static void fill_convenience(ipfix_data_record_t *rec)
                 rec->flow_end_ms = f->v.u64;
             }
             break;
+        case IPFIX_IE_bgpSourceAsNumber:
+            if (f->kind == IPFIX_VALUE_UINT) {
+                rec->has_bgp_src_as = 1;
+                rec->bgp_src_as = (uint32_t)f->v.u64;
+            }
+            break;
+        case IPFIX_IE_bgpDestinationAsNumber:
+            if (f->kind == IPFIX_VALUE_UINT) {
+                rec->has_bgp_dst_as = 1;
+                rec->bgp_dst_as = (uint32_t)f->v.u64;
+            }
+            break;
+        case IPFIX_IE_bgpNextHopIPv4Address:
+            if (f->kind == IPFIX_VALUE_IPV4) {
+                rec->has_bgp_next_hop_ipv4 = 1;
+                rec->bgp_next_hop_ipv4 = f->v.ipv4;
+            }
+            break;
+        case IPFIX_IE_ipNextHopIPv4Address:
+            if (f->kind == IPFIX_VALUE_IPV4) {
+                rec->has_ip_next_hop_ipv4 = 1;
+                rec->ip_next_hop_ipv4 = f->v.ipv4;
+            }
+            break;
+        case IPFIX_IE_ingressInterface:
+            if (f->kind == IPFIX_VALUE_UINT) {
+                rec->has_ingress_if = 1;
+                rec->ingress_if = (uint32_t)f->v.u64;
+            }
+            break;
+        case IPFIX_IE_egressInterface:
+            if (f->kind == IPFIX_VALUE_UINT) {
+                rec->has_egress_if = 1;
+                rec->egress_if = (uint32_t)f->v.u64;
+            }
+            break;
+        case IPFIX_IE_tcpControlBits:
+            if (f->kind == IPFIX_VALUE_UINT) {
+                rec->has_tcp_flags = 1;
+                rec->tcp_flags = (uint16_t)f->v.u64;
+            }
+            break;
+        case IPFIX_IE_sourceMacAddress:
+            if (f->kind == IPFIX_VALUE_MAC) {
+                rec->has_src_mac = 1;
+                memcpy(rec->src_mac, f->v.mac, 6);
+            }
+            break;
+        case IPFIX_IE_destinationMacAddress:
+            if (f->kind == IPFIX_VALUE_MAC) {
+                rec->has_dst_mac = 1;
+                memcpy(rec->dst_mac, f->v.mac, 6);
+            }
+            break;
         default:
             break;
         }
@@ -1256,5 +1310,61 @@ char *ipfix_format_ipv6(const uint8_t addr[IPFIX_IPV6_ADDR_LEN],
              addr[4], addr[5], addr[6], addr[7],
              addr[8], addr[9], addr[10], addr[11],
              addr[12], addr[13], addr[14], addr[15]);
+    return buf;
+}
+
+int ipfix_record_has_5tuple(const ipfix_data_record_t *rec)
+{
+    if (!rec) {
+        return 0;
+    }
+    return rec->has_src_ipv4 && rec->has_dst_ipv4 &&
+           rec->has_src_port && rec->has_dst_port && rec->has_protocol;
+}
+
+int ipfix_record_flow_key(const ipfix_data_record_t *rec, ipfix_flow_key_t *out)
+{
+    if (!rec || !out) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    if (rec->has_src_ipv4) {
+        out->src_ipv4 = rec->src_ipv4;
+    }
+    if (rec->has_dst_ipv4) {
+        out->dst_ipv4 = rec->dst_ipv4;
+    }
+    if (rec->has_src_port) {
+        out->src_port = rec->src_port;
+    }
+    if (rec->has_dst_port) {
+        out->dst_port = rec->dst_port;
+    }
+    if (rec->has_protocol) {
+        out->protocol = rec->protocol;
+    }
+    if (rec->has_flow_start_ms) {
+        out->has_start_ms = 1;
+        out->flow_start_ms = rec->flow_start_ms;
+    }
+    if (rec->has_flow_end_ms) {
+        out->has_end_ms = 1;
+        out->flow_end_ms = rec->flow_end_ms;
+    }
+    out->has_5tuple = ipfix_record_has_5tuple(rec) ? 1 : 0;
+    return out->has_5tuple ? 1 : 0;
+}
+
+char *ipfix_format_flow_key(const ipfix_flow_key_t *key, char *buf, size_t buflen)
+{
+    char s[16], d[16];
+    if (!key || !buf || buflen < 48u) {
+        return NULL;
+    }
+    ipfix_format_ipv4(key->src_ipv4, s, sizeof s);
+    ipfix_format_ipv4(key->dst_ipv4, d, sizeof d);
+    snprintf(buf, buflen, "%s:%u > %s:%u proto=%u",
+             s, (unsigned)key->src_port, d, (unsigned)key->dst_port,
+             (unsigned)key->protocol);
     return buf;
 }

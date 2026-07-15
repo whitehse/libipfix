@@ -8,8 +8,10 @@
 - [x] Stream reassembly (`ipfix_feed_input`)
 - [x] Smoke / dialectic / error tests
 - [x] Example + fuzz harness + man page
+- [x] Forensics helpers: `ipfix_flow_key_t`, `ipfix_record_flow_key`, BGP/next-hop/interface convenience fields
 - [ ] Variable-length field end-to-end test with multi-byte length prefix
 - [ ] Sequence-number gap helper (optional, still syscall-free)
+- [ ] Dialectic test covering BGP AS + next-hop convenience extraction
 
 ## Medium-term
 

@@ -239,6 +239,23 @@ typedef struct {
     uint32_t           offset;   /**< Byte offset within current message. */
 } ipfix_error_t;
 
+/**
+ * Compact flow key for forensics correlation (5-tuple + timing).
+ * Populated by ipfix_record_flow_key() when fields are present.
+ */
+typedef struct {
+    uint32_t src_ipv4;       /**< Host order; 0 if unknown. */
+    uint32_t dst_ipv4;
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint8_t  protocol;
+    uint8_t  has_5tuple;     /**< 1 if src/dst/port/proto all present. */
+    uint64_t flow_start_ms;  /**< 0 if unknown. */
+    uint64_t flow_end_ms;
+    int      has_start_ms;
+    int      has_end_ms;
+} ipfix_flow_key_t;
+
 /** Decoded data / options data record. */
 typedef struct {
     uint16_t      template_id;
@@ -256,6 +273,16 @@ typedef struct {
     int           has_packet_delta;
     int           has_flow_start_ms;
     int           has_flow_end_ms;
+    /* Forensics / core-router convenience (BGP, next-hop, interfaces). */
+    int           has_bgp_src_as;
+    int           has_bgp_dst_as;
+    int           has_bgp_next_hop_ipv4;
+    int           has_ip_next_hop_ipv4;
+    int           has_ingress_if;
+    int           has_egress_if;
+    int           has_tcp_flags;
+    int           has_src_mac;
+    int           has_dst_mac;
     uint32_t      src_ipv4;
     uint32_t      dst_ipv4;
     uint16_t      src_port;
@@ -265,6 +292,15 @@ typedef struct {
     uint64_t      packet_delta;
     uint64_t      flow_start_ms;
     uint64_t      flow_end_ms;
+    uint32_t      bgp_src_as;
+    uint32_t      bgp_dst_as;
+    uint32_t      bgp_next_hop_ipv4;
+    uint32_t      ip_next_hop_ipv4;
+    uint32_t      ingress_if;
+    uint32_t      egress_if;
+    uint16_t      tcp_flags;
+    uint8_t       src_mac[6];
+    uint8_t       dst_mac[6];
 } ipfix_data_record_t;
 
 /** An event dequeued from the receiver. */
@@ -413,6 +449,25 @@ char *ipfix_format_ipv4(uint32_t addr, char *buf, size_t buflen);
  */
 char *ipfix_format_ipv6(const uint8_t addr[IPFIX_IPV6_ADDR_LEN],
                         char *buf, size_t buflen);
+
+/**
+ * Extract a compact flow key from a decoded data record.
+ * Returns 1 if a full IPv4 5-tuple is present, 0 if partial, negative on error.
+ * Always fills *out with whatever fields are available (zeros otherwise).
+ */
+int ipfix_record_flow_key(const ipfix_data_record_t *rec, ipfix_flow_key_t *out);
+
+/**
+ * Format a flow key as "src:sport > dst:dport proto=N" into buf.
+ * Returns buf on success, NULL if buf is too small or args invalid.
+ */
+char *ipfix_format_flow_key(const ipfix_flow_key_t *key, char *buf, size_t buflen);
+
+/**
+ * True if the record has at least src IPv4, dst IPv4, ports, and protocol.
+ * Useful as a gate before joining with CPE NAT / BGP tables.
+ */
+int ipfix_record_has_5tuple(const ipfix_data_record_t *rec);
 
 #ifdef __cplusplus
 }
